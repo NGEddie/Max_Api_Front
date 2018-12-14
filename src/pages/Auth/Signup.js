@@ -32,7 +32,7 @@ class Signup extends Component {
 
   inputChangeHandler = (input, value) => {
     this.setState(prevState => {
-      let isValid = true;
+      let isValid = false;
       for (const validator of prevState.signupForm[input].validators) {
         isValid = isValid && validator(value);
       }
@@ -44,13 +44,13 @@ class Signup extends Component {
           value: value
         }
       };
-      let formIsValid = true;
+      let formIsValid = false;
       for (const inputName in updatedForm) {
         formIsValid = formIsValid && updatedForm[inputName].valid;
       }
       return {
         signupForm: updatedForm,
-        formIsValid: formIsValid
+        formIsValid: isValid
       };
     });
   };
@@ -76,7 +76,7 @@ class Signup extends Component {
           <Input
             id="email"
             label="Your E-Mail"
-            type="email"
+            type="text"
             control="input"
             onChange={this.inputChangeHandler}
             onBlur={this.inputBlurHandler.bind(this, 'email')}

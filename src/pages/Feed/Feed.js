@@ -93,26 +93,53 @@ class Feed extends Component {
       page--;
       this.setState({ postPage: page });
     }
-    fetch(`http://localhost:8080/feed/posts?page=${page}`, {
+
+    //Restful API Logic
+    // fetch(`http://localhost:8080/feed/posts?page=${page}`, {
+    //   headers: {
+    //     Authorization: `Bearer ${this.props.token}`
+    //   }
+    // })
+    const graphqlQuery = {
+      query: `
+        {
+          getPosts(page: ${page}) {
+            posts {
+              _id
+              title
+              content
+              imageUrl
+              creator { name }
+              createdAt
+            }
+            totalPosts
+          }
+        }
+      `
+    };
+    fetch('http://localhost:8080/graphql', {
+      method: 'POST',
       headers: {
+        'Content-Type': 'application/json',
         Authorization: `Bearer ${this.props.token}`
-      }
+      },
+      body: JSON.stringify(graphqlQuery)
     })
       .then(res => {
-        if (res.status !== 200) {
-          throw new Error('Failed to fetch posts.');
-        }
+        // if (res.status !== 200) {
+        //   throw new Error('Failed to fetch posts.');
+        // }
         return res.json();
       })
       .then(resData => {
         this.setState({
-          posts: resData.posts.map(post => {
+          posts: resData.data.getPosts.posts.map(post => {
             return {
               ...post,
               imagePath: post.imageUrl
             };
           }),
-          totalPosts: resData.totalItems,
+          totalPosts: resData.data.getPosts.totalPosts,
           postsLoading: false
         });
       })
@@ -167,41 +194,127 @@ class Feed extends Component {
       editLoading: true
     });
     const formData = new FormData();
-    formData.append('title', postData.title);
-    formData.append('content', postData.content);
-    formData.append('a test', 'Hi');
+    //get the image
     formData.append('image', postData.image);
-
-    let url = 'http://localhost:8080/feed/post';
-    let method = 'POST';
     if (this.state.editPost) {
-      url = `http://localhost:8080/feed/post/${this.state.editPost._id}`;
-      method = 'PUT';
+      formData.append('oldPath', this.state.editPost.imagePath);
     }
 
-    fetch(url, {
-      method: method,
-      body: formData,
+    fetch('http://localhost:8080/post-image', {
+      method: 'PUT',
       headers: {
         Authorization: `Bearer ${this.props.token}`
-      }
+      },
+      body: formData
     })
-      .then(res => {
-        if (res.status !== 200 && res.status !== 201) {
-          throw new Error('Creating or editing a post failed!');
+      .then(res => res.json())
+      .then(fileResData => {
+        const imageUrl = fileResData.filePath;
+        let url = 'http://localhost:8080/graphql';
+        let method = 'POST';
+
+        let graphqlQuery = {
+          query: `
+          mutation {
+            createPost(postInput:{title: "${postData.title}", content: "${
+            postData.content
+          }", imageUrl:"${imageUrl}"}){
+              _id
+              title
+              content
+              imageUrl
+              creator {
+                name
+              }
+              createdAt
+            }
+          }
+          `
+        };
+
+        if (this.state.editPost) {
+          graphqlQuery = {
+            query: `
+              mutation {
+                editPost(postId: "${
+                  this.state.editPost._id
+                }",postInput:{title: "${postData.title}", content: "${
+              postData.content
+            }", imageUrl:"${imageUrl}"}){
+                  _id
+                  title
+                  content
+                  imageUrl
+                  creator {
+                    name
+                  }
+                  createdAt
+                }
+              }
+              `
+          };
         }
+
+        return fetch(url, {
+          method: method,
+          body: JSON.stringify(graphqlQuery),
+          headers: {
+            Authorization: `Bearer ${this.props.token}`,
+            'Content-Type': 'application/json'
+          }
+        });
+      })
+      //Restful API code
+      // let url = 'http://localhost:8080/feed/post';
+      // let method = 'POST';
+      // if (this.state.editPost) {
+      //   url = `http://localhost:8080/feed/post/${this.state.editPost._id}`;
+      //   method = 'PUT';
+      // }
+
+      //GraphQL code
+
+      .then(res => {
+        // if (res.status !== 200 && res.status !== 201) {
+        //   throw new Error('Creating or editing a post failed!');
+        // }
         return res.json();
       })
       .then(resData => {
-        // const post = {
-        //   _id: resData.post._id,
-        //   title: resData.post.title,
-        //   content: resData.post.content,
-        //   creator: resData.post.creator,
-        //   createdAt: resData.post.createdAt
-        // };
+        //graphql error check
+        if (resData.errors && resData.errors[0].status === 422) {
+          throw new Error(`${resData.errors[0].data[0].message}`);
+        } else if (resData.errors) {
+          throw new Error('Failed to get post');
+        }
+
+        let resDataField = 'createPost';
+        if (this.state.editPost) {
+          resDataField = 'editPost';
+        }
+
+        const post = {
+          _id: resData.data[resDataField]._id,
+          title: resData.data[resDataField].title,
+          content: resData.data[resDataField].content,
+          creator: resData.data[resDataField].creator,
+          createdAt: resData.data[resDataField].createdAt,
+          imagePath: resData.data[resDataField].imageUrl
+        };
+
         this.setState(prevState => {
+          let updatedPosts = [...prevState.posts];
+          if (prevState.editPost) {
+            const postIndex = prevState.posts.findIndex(
+              post => post._id === prevState.editPost._id
+            );
+            updatedPosts[postIndex] = post;
+          } else {
+            updatedPosts.pop();
+            updatedPosts.unshift(post);
+          }
           return {
+            posts: updatedPosts,
             isEditing: false,
             editPost: null,
             editLoading: false
